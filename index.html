@@ -516,8 +516,8 @@
   <div class="big-sub" id="ovSub">—</div>
   <div class="big-pron" id="ovPron"></div>
   <div class="overlay-actions">
-    <button style="background:var(--red)" onclick="speak(currentOverlayPhrase.pl,'pl-PL',null)">🔊 Polski</button>
-    <button style="background:var(--gold-dark)" onclick="speak(currentOverlayPhrase.vi,'vi-VN',null)">🔊 Wietnamski</button>
+    <button style="background:var(--red)" onclick="speak(ttsFor(currentOverlayPhrase,'pl'),'pl-PL',null)">🔊 Polski</button>
+    <button style="background:var(--gold-dark)" onclick="speak(ttsFor(currentOverlayPhrase,'vi'),'vi-VN',null)">🔊 Wietnamski</button>
   </div>
   <div class="ov-answers" id="ovAnswers" style="display:none;"></div>
 </div>
@@ -580,9 +580,9 @@ const PHRASES_OPIEKUNKA = [
   // Łazienka
   {id:'o-l1', cat:'lazienka', icon:'🚽', pl:'Chcesz iść do toalety?', vi:'Con có muốn đi vệ sinh không?', viPron:'kon ko muon di ve sin khom',
     isQuestion:true, answers:[YES,NO]},
-  {id:'o-l2', cat:'lazienka', icon:'❓', pl:'Musisz siku czy kupę?', vi:'Con muốn đi tè hay đi ị?', viPron:'kon muon di te haj di i',
+  {id:'o-l2', cat:'lazienka', icon:'❓', pl:'Musisz siku czy kupę?', plTts:'Musisz śiku czy kupę?', vi:'Con muốn đi tè hay đi ị?', viPron:'kon muon di te haj di i',
     isQuestion:true, answers:[
-      {pl:'Siku', vi:'Đi tè', viPron:'di te'},
+      {pl:'Siku', plTts:'Śiku', vi:'Đi tè', viPron:'di te'},
       {pl:'Kupę', vi:'Đi ị', viPron:'di i'},
     ]},
   {id:'o-l3', cat:'lazienka', icon:'🚪', pl:'Toaleta, łazienka', vi:'Nhà vệ sinh', viPron:'nia ve sin'},
@@ -755,7 +755,7 @@ const PHRASES_DZIECKO = [
 
   // Łazienka
   {id:'d-l1', cat:'lazienka', icon:'🚽', pl:'Chcę do toalety', vi:'Con muốn đi vệ sinh', viPron:'kon muon di ve sin'},
-  {id:'d-l2', cat:'lazienka', icon:'😳', pl:'Zrobiłam siku w majtki', vi:'Con lỡ đi tè ra quần rồi', viPron:'kon ly di te ra kłan zoj'},
+  {id:'d-l2', cat:'lazienka', icon:'😳', pl:'Zrobiłam siku w majtki', plTts:'Zrobiłam śiku w majtki', vi:'Con lỡ đi tè ra quần rồi', viPron:'kon ly di te ra kłan zoj'},
   {id:'d-l3', cat:'lazienka', icon:'❓', pl:'Pomożesz mi w toalecie?', vi:'Cô giúp con đi vệ sinh được không?', viPron:'ko zup kon di ve sin dyk khom',
     isQuestion:true, answers:[
       {pl:'Tak, chodź', vi:'Được, đi nào', viPron:'dyk, di nau'},
@@ -922,7 +922,15 @@ function speakRemote(text, langCode, btn){
   });
 }
 
+/* Zamienia np. "Vâng / Dạ" na "Vâng, Dạ" tylko na potrzeby audio —
+   syntezatory mowy czytały znak "/" na głos jako "forward slash".
+   Wyświetlany tekst na karcie zostaje bez zmian. */
+function sanitizeForSpeech(text){
+  return text.replace(/\s*\/\s*/g, ', ');
+}
+
 function speak(text, lang, btn){
+  text = sanitizeForSpeech(text);
   const langCode = lang.split('-')[0];
   const voice = window.speechSynthesis ? pickVoice(langCode) : null;
 
@@ -948,6 +956,13 @@ function speak(text, lang, btn){
     if(window.speechSynthesis) window.speechSynthesis.cancel();
     speakRemote(text, langCode, btn);
   }
+}
+
+/* Zwraca tekst do ODCZYTU (może różnić się od wyświetlanego, gdy dany
+   zwrot ma zapisane niestandardowe brzmienie poprawiające wymowę —
+   patrz pola plTts/viTts w danych). */
+function ttsFor(obj, key){
+  return obj[key + 'Tts'] || obj[key];
 }
 
 /* ============================================================
@@ -994,8 +1009,8 @@ function answerRowHtml(ans, mode){
         <div class="answer-primary">${primary}</div>
         <div class="answer-secondary">${secondary}${mode==='opiekunka' ? ` (${ans.viPron})` : ''}</div>
       </div>
-      <button class="answer-speak pl" data-speak-pl="${escapeAttr(ans.pl)}" title="Odtwórz po polsku">🔊</button>
-      <button class="answer-speak vi" data-speak-vi="${escapeAttr(ans.vi)}" title="Odtwórz po wietnamsku">🔊</button>
+      <button class="answer-speak pl" data-speak-pl="${escapeAttr(ttsFor(ans,'pl'))}" title="Odtwórz po polsku">🔊</button>
+      <button class="answer-speak vi" data-speak-vi="${escapeAttr(ttsFor(ans,'vi'))}" title="Odtwórz po wietnamsku">🔊</button>
     </div>
   `;
 }
@@ -1075,8 +1090,8 @@ document.getElementById('cards').addEventListener('click', (e) => {
   const phrase = findPhrase(card.dataset.id);
   if(!phrase) return;
   const action = actionBtn.dataset.action;
-  if(action === 'speak-pl') speak(phrase.pl, 'pl-PL', actionBtn);
-  else if(action === 'speak-vi') speak(phrase.vi, 'vi-VN', actionBtn);
+  if(action === 'speak-pl') speak(ttsFor(phrase,'pl'), 'pl-PL', actionBtn);
+  else if(action === 'speak-vi') speak(ttsFor(phrase,'vi'), 'vi-VN', actionBtn);
   else if(action === 'show') openOverlay(phrase);
 });
 
@@ -1116,7 +1131,7 @@ function openOverlay(p){
 
   document.getElementById('overlay').classList.add('open');
   if(mode === 'dziecko'){
-    speak(p.pl, 'pl-PL', null);
+    speak(ttsFor(p,'pl'), 'pl-PL', null);
   }
 }
 function closeOverlay(){

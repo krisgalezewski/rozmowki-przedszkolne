@@ -505,7 +505,7 @@
 </main>
 
 <div class="voice-note">
-  <b>Uwaga:</b> wymowa wietnamska jest zapisana w uproszczony sposób, tak aby ułatwić odczytanie po polsku — nie jest to pełny zapis fonetyczny. Zwroty w kategorii <b>❓</b> mają podpowiedzi najbardziej prawdopodobnych odpowiedzi — to tylko przykłady, dziecko może odpowiedzieć inaczej. Tłumaczenia przygotowano z najlepszą starannością, ale warto poprosić rodziców dziewczynki o sprawdzenie i poprawienie zwrotów, zwłaszcza tych ważnych (np. zdrowotnych). Audio polskie odtwarzane jest przez syntezator mowy telefonu. Audio wietnamskie korzysta z głosu telefonu, jeśli jest zainstalowany, a jeśli nie — automatycznie pobiera nagranie przez internet, więc do zwrotów wietnamskich potrzebne jest połączenie z siecią.
+  <b>Uwaga:</b> wymowa wietnamska jest zapisana w uproszczony sposób, tak aby ułatwić odczytanie po polsku — nie jest to pełny zapis fonetyczny. Zwroty w kategorii <b>❓</b> mają podpowiedzi najbardziej prawdopodobnych odpowiedzi — to tylko przykłady, dziecko może odpowiedzieć inaczej. Tłumaczenia przygotowano z najlepszą starannością, ale warto poprosić rodziców dziewczynki o sprawdzenie i poprawienie zwrotów, zwłaszcza tych ważnych (np. zdrowotnych). Audio odtwarzane jest z wcześniej nagranych plików MP3 (Google Cloud Text-to-Speech), dlatego brzmi tak samo dobrze na każdym telefonie. Jeśli dla jakiegoś zwrotu zabraknie nagrania, strona awaryjnie użyje głosu telefonu (a dla wietnamskiego — audio online, wymagające połączenia z internetem).
 </div>
 
 <!-- Fullscreen "show & say" overlay -->
@@ -516,8 +516,8 @@
   <div class="big-sub" id="ovSub">—</div>
   <div class="big-pron" id="ovPron"></div>
   <div class="overlay-actions">
-    <button style="background:var(--red)" onclick="speak(ttsFor(currentOverlayPhrase,'pl'),'pl-PL',null)">🔊 Polski</button>
-    <button style="background:var(--gold-dark)" onclick="speak(ttsFor(currentOverlayPhrase,'vi'),'vi-VN',null)">🔊 Wietnamski</button>
+    <button style="background:var(--red)" onclick="playAudio(currentOverlayPhrase.id,'pl',ttsFor(currentOverlayPhrase,'pl'),'pl-PL',null)">🔊 Polski</button>
+    <button style="background:var(--gold-dark)" onclick="playAudio(currentOverlayPhrase.id,'vi',ttsFor(currentOverlayPhrase,'vi'),'vi-VN',null)">🔊 Wietnamski</button>
   </div>
   <div class="ov-answers" id="ovAnswers" style="display:none;"></div>
 </div>
@@ -875,21 +875,10 @@ function pickVoice(langPrefix){
   return female || matches[0];
 }
 
-let hasLocalViVoice = false;
-function checkViVoice(){
-  hasLocalViVoice = !!pickVoice('vi');
-  const warn = document.getElementById('voiceWarning');
-  // Gdy nie ma lokalnego głosu wietnamskiego, audio VI i tak zadziała
-  // (przez internet), więc pokazujemy tylko spokojną informację, a nie alarm.
-  warn.textContent = hasLocalViVoice
-    ? ''
-    : 'ℹ️ Ten telefon nie ma zainstalowanego głosu wietnamskiego — audio wietnamskie będzie odtwarzane przez internet. Upewnij się, że masz połączenie z siecią.';
-  warn.style.display = hasLocalViVoice ? 'none' : 'block';
-}
-if(window.speechSynthesis){
-  window.speechSynthesis.onvoiceschanged = () => { checkViVoice(); };
-  setTimeout(checkViVoice, 300);
-}
+/* Uwaga: nie sprawdzamy już przy starcie strony, czy telefon ma lokalny głos
+   wietnamski — od teraz priorytetem są nagrane wcześniej pliki MP3
+   (audio/pl/, audio/vi/), a pickVoice() jest używane tylko jako część
+   awaryjnej ścieżki w speakLive(), gdy jakiegoś pliku MP3 zabraknie. */
 
 /* Zapasowe audio online (Google Translate TTS) — używane tylko wtedy, gdy
    telefon nie ma zainstalowanego lokalnego głosu dla danego języka. Dzięki
@@ -929,7 +918,7 @@ function sanitizeForSpeech(text){
   return text.replace(/\s*\/\s*/g, ', ');
 }
 
-function speak(text, lang, btn){
+function speakLive(text, lang, btn){
   text = sanitizeForSpeech(text);
   const langCode = lang.split('-')[0];
   const voice = window.speechSynthesis ? pickVoice(langCode) : null;
@@ -964,6 +953,38 @@ function speak(text, lang, btn){
 function ttsFor(obj, key){
   return obj[key + 'Tts'] || obj[key];
 }
+
+/* Nagrane wcześniej pliki MP3 (Google Cloud TTS) — folder audio/pl/ i audio/vi/
+   obok tego pliku HTML. To jest teraz GŁÓWNY sposób odtwarzania audio: brzmi
+   dużo lepiej niż syntezator w telefonie i działa identycznie na każdym
+   urządzeniu. Jeśli plik nie istnieje (np. dla nowo dodanego zwrotu, zanim
+   zdążysz wygenerować dla niego nagranie), strona automatycznie przełącza się
+   na starą metodę (głos telefonu / audio online), więc nic się nie psuje.
+   fileId: 'o-p1' dla głównego zwrotu, albo 'o-l2-a0' dla pierwszej
+   podpowiedzi odpowiedzi w zwrocie o-l2 (indeksowane od 0). */
+let localAudio = null;
+function playAudio(fileId, langCode, fallbackText, lang, btn){
+  if(localAudio){ localAudio.pause(); localAudio = null; }
+  if(remoteAudio){ remoteAudio.pause(); remoteAudio = null; }
+  if(window.speechSynthesis) window.speechSynthesis.cancel();
+
+  const src = `audio/${langCode}/${fileId}.mp3`;
+  const audio = new Audio(src);
+  localAudio = audio;
+  if(btn) btn.classList.add('speaking');
+  const stop = () => { if(btn) btn.classList.remove('speaking'); };
+  audio.addEventListener('ended', stop);
+  audio.addEventListener('error', () => {
+    // Brak pliku MP3 dla tego zwrotu — użyj starej metody jako zapasowej.
+    stop();
+    speakLive(fallbackText, lang, btn);
+  });
+  audio.play().catch(() => {
+    stop();
+    speakLive(fallbackText, lang, btn);
+  });
+}
+
 
 /* ============================================================
    RENDEROWANIE
@@ -1000,17 +1021,18 @@ function matchesQuery(phrase, q){
   return hay.includes(q.toLowerCase());
 }
 
-function answerRowHtml(ans, mode){
+function answerRowHtml(ans, mode, phraseId, ansIndex){
   const primary = mode === 'opiekunka' ? ans.vi : ans.pl;
   const secondary = mode === 'opiekunka' ? ans.pl : ans.vi;
+  const fileId = `${phraseId}-a${ansIndex}`;
   return `
     <div class="answer-row">
       <div class="answer-texts">
         <div class="answer-primary">${primary}</div>
         <div class="answer-secondary">${secondary}${mode==='opiekunka' ? ` (${ans.viPron})` : ''}</div>
       </div>
-      <button class="answer-speak pl" data-speak-pl="${escapeAttr(ttsFor(ans,'pl'))}" title="Odtwórz po polsku">🔊</button>
-      <button class="answer-speak vi" data-speak-vi="${escapeAttr(ttsFor(ans,'vi'))}" title="Odtwórz po wietnamsku">🔊</button>
+      <button class="answer-speak pl" data-file="${fileId}" data-lang="pl" data-fallback="${escapeAttr(ttsFor(ans,'pl'))}" title="Odtwórz po polsku">🔊</button>
+      <button class="answer-speak vi" data-file="${fileId}" data-lang="vi" data-fallback="${escapeAttr(ttsFor(ans,'vi'))}" title="Odtwórz po wietnamsku">🔊</button>
     </div>
   `;
 }
@@ -1052,7 +1074,7 @@ function render(){
     const answersHtml = (p.isQuestion && p.answers && p.answers.length)
       ? `<div class="answers-block">
            <div class="answers-label">Możliwa odpowiedź</div>
-           ${p.answers.map(a => answerRowHtml(a, mode)).join('')}
+           ${p.answers.map((a,i) => answerRowHtml(a, mode, p.id, i)).join('')}
          </div>`
       : '';
     return `
@@ -1078,10 +1100,12 @@ function render(){
 
 /* Delegacja zdarzeń dla kart (unika problemów z cudzysłowami w onclick) */
 document.getElementById('cards').addEventListener('click', (e) => {
-  const speakPlAns = e.target.closest('[data-speak-pl]');
-  if(speakPlAns){ speak(speakPlAns.dataset.speakPl, 'pl-PL', speakPlAns); return; }
-  const speakViAns = e.target.closest('[data-speak-vi]');
-  if(speakViAns){ speak(speakViAns.dataset.speakVi, 'vi-VN', speakViAns); return; }
+  const ansBtn = e.target.closest('[data-file]');
+  if(ansBtn){
+    const langCode = ansBtn.dataset.lang; // 'pl' | 'vi'
+    playAudio(ansBtn.dataset.file, langCode, ansBtn.dataset.fallback, langCode === 'pl' ? 'pl-PL' : 'vi-VN', ansBtn);
+    return;
+  }
 
   const actionBtn = e.target.closest('[data-action]');
   if(!actionBtn) return;
@@ -1090,10 +1114,11 @@ document.getElementById('cards').addEventListener('click', (e) => {
   const phrase = findPhrase(card.dataset.id);
   if(!phrase) return;
   const action = actionBtn.dataset.action;
-  if(action === 'speak-pl') speak(ttsFor(phrase,'pl'), 'pl-PL', actionBtn);
-  else if(action === 'speak-vi') speak(ttsFor(phrase,'vi'), 'vi-VN', actionBtn);
+  if(action === 'speak-pl') playAudio(phrase.id, 'pl', ttsFor(phrase,'pl'), 'pl-PL', actionBtn);
+  else if(action === 'speak-vi') playAudio(phrase.id, 'vi', ttsFor(phrase,'vi'), 'vi-VN', actionBtn);
   else if(action === 'show') openOverlay(phrase);
 });
+
 
 /* ============ WYSZUKIWANIE ============ */
 const searchInput = document.getElementById('searchInput');
@@ -1123,7 +1148,7 @@ function openOverlay(p){
   if(p.isQuestion && p.answers && p.answers.length){
     ovAnswers.style.display = 'block';
     ovAnswers.innerHTML = `<div class="answers-label">Możliwa odpowiedź</div>` +
-      p.answers.map(a => answerRowHtml(a, mode)).join('');
+      p.answers.map((a,i) => answerRowHtml(a, mode, p.id, i)).join('');
   } else {
     ovAnswers.style.display = 'none';
     ovAnswers.innerHTML = '';
@@ -1131,18 +1156,21 @@ function openOverlay(p){
 
   document.getElementById('overlay').classList.add('open');
   if(mode === 'dziecko'){
-    speak(ttsFor(p,'pl'), 'pl-PL', null);
+    playAudio(p.id, 'pl', ttsFor(p,'pl'), 'pl-PL', null);
   }
 }
 function closeOverlay(){
   window.speechSynthesis && window.speechSynthesis.cancel();
+  if(localAudio) localAudio.pause();
+  if(remoteAudio) remoteAudio.pause();
   document.getElementById('overlay').classList.remove('open');
 }
 document.getElementById('overlay').addEventListener('click', (e) => {
-  const speakPlAns = e.target.closest('[data-speak-pl]');
-  if(speakPlAns){ speak(speakPlAns.dataset.speakPl, 'pl-PL', speakPlAns); return; }
-  const speakViAns = e.target.closest('[data-speak-vi]');
-  if(speakViAns){ speak(speakViAns.dataset.speakVi, 'vi-VN', speakViAns); return; }
+  const ansBtn = e.target.closest('[data-file]');
+  if(ansBtn){
+    const langCode = ansBtn.dataset.lang;
+    playAudio(ansBtn.dataset.file, langCode, ansBtn.dataset.fallback, langCode === 'pl' ? 'pl-PL' : 'vi-VN', ansBtn);
+  }
 });
 
 /* ============ INIT ============ */
